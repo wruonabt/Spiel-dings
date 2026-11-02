@@ -649,11 +649,17 @@ function renderParty() {
   $('pHint').textContent = party.host ? (party.roster.length < 2 ? 'Teile den Code – 2 bis 4 Spieler' : 'Bereit – Match starten!') : 'Warte auf den Host…';
 }
 function broadcastRoster() { bc({ t: 'roster', list: party.roster }); renderParty(); }
+const PEER_CFG = { config: { iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turns:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' } ] } };
 function createParty(tries = 0) {
   if (!peerOk()) return;
   const code = mkCode(); setStatus('Party wird erstellt…');
-  const peer = new Peer('sd-' + code);
+  const peer = new Peer('sd-' + code, PEER_CFG);
   party = { host: true, peer, id: null, code, conns: {}, roster: [] };
+  peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });
   peer.on('open', id => { party.id = id; party.roster = [{ id, name: save.name, skin: save.skin }]; setStatus(''); renderParty(); });
   peer.on('error', e => { if (e.type === 'unavailable-id' && tries < 3) { party = null; peer.destroy(); createParty(tries + 1); } else { toast('Fehler: ' + e.type, 4000); leaveParty(); } });
   peer.on('connection', c => {
@@ -665,15 +671,15 @@ function createParty(tries = 0) {
 function joinParty() {
   const code = $('codeIn').value.trim().toUpperCase(); if (code.length < 4 || !peerOk()) return;
   setStatus('Verbinde…');
-  const peer = new Peer(); party = { host: false, peer, id: null, code, roster: [] };
+  const peer = new Peer(PEER_CFG); party = { host: false, peer, id: null, code, roster: [] };
   peer.on('open', id => {
     party.id = id; const c = peer.connect('sd-' + code, { reliable: true }); party.conn = c;
-    setTimeout(() => { if (party && party.conn === c && !c.open) { toast('Party nicht gefunden', 4000); leaveParty(); } }, 10000);
+    setTimeout(() => { if (party && party.conn === c && !c.open) { toast('Verbindung nicht möglich – Netzwerk blockiert Direktverbindung?', 5000); leaveParty(); } }, 25000);
     c.on('open', () => { setStatus(''); c.send({ t: 'hello', name: save.name, skin: save.skin }); });
     c.on('data', clientRecv);
     c.on('close', () => { if (party) { toast('Verbindung zur Party getrennt', 4000); leaveParty(); } });
   });
-  peer.on('error', e => { toast(e.type === 'peer-unavailable' ? 'Party nicht gefunden' : 'Fehler: ' + e.type, 4000); leaveParty(); });
+  peer.on('error', e => { toast(e.type === 'peer-unavailable' ? 'Party nicht gefunden – Code prüfen, Host-Tab muss offen sein' : 'Fehler: ' + e.type, 5000); leaveParty(); });
 }
 function leaveParty() {
   if (party) { try { party.peer.destroy(); } catch (e) {} }
